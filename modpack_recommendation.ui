@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ModpackRecommendationWindow</class>
+ <widget class="QWidget" name="ModpackRecommendationWindow">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>1280</width>
+    <height>760</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Modrinth Modpack Recommender</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <layout class="QHBoxLayout" name="searchLayout">
+     <item>
+      <widget class="QLabel" name="labelQuery">
+       <property name="text">
+        <string>Query</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="le_query">
+       <property name="placeholderText">
+        <string>ex) lightweight performance vanilla plus</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_recommend">
+       <property name="text">
+        <string>Recommend</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupFilters">
+     <property name="title">
+      <string>Filters</string>
+     </property>
+     <layout class="QGridLayout" name="filterLayout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="labelLoader">
+        <property name="text">
+         <string>Loader</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QComboBox" name="cb_loader"/>
+      </item>
+      <item row="0" column="2">
+       <widget class="QLabel" name="labelGameVersion">
+        <property name="text">
+         <string>Game version</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="3">
+       <widget class="QComboBox" name="cb_game_version"/>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="labelClientSide">
+        <property name="text">
+         <string>Client side</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QComboBox" name="cb_client_side"/>
+      </item>
+      <item row="1" column="2">
+       <widget class="QLabel" name="labelServerSide">
+        <property name="text">
+         <string>Server side</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="3">
+       <widget class="QComboBox" name="cb_server_side"/>
+      </item>
+      <item row="2" column="0">
+       <widget class="QCheckBox" name="chk_min_downloads">
+        <property name="text">
+         <string>Minimum downloads</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QSpinBox" name="sb_min_downloads">
+        <property name="maximum">
+         <number>2000000000</number>
+        </property>
+        <property name="singleStep">
+         <number>1000</number>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="2">
+       <widget class="QLabel" name="lb_popularity">
+        <property name="text">
+         <string>Popularity 20</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="3">
+       <widget class="QSlider" name="sl_popularity">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="maximum">
+         <number>100</number>
+        </property>
+        <property name="value">
+         <number>20</number>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0" colspan="4">
+       <widget class="QCheckBox" name="chk_translate">
+        <property name="text">
+         <string>Translate non-English query</string>
+        </property>
+        <property name="checked">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="lb_status">
+     <property name="text">
+      <string>Ready</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTableWidget" name="tbl_results">
+     <property name="alternatingRowColors">
+      <bool>true</bool>
+     </property>
+     <property name="selectionBehavior">
+      <enum>QAbstractItemView::SelectRows</enum>
+     </property>
+     <property name="columnCount">
+      <number>8</number>
+     </property>
+     <column>
+      <property name="text">
+       <string>Score</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Name</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Downloads</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Loader</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Versions</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Client</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Server</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>URL</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

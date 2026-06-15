@@ -35,6 +35,7 @@ try:
     from tqdm import tqdm
 except ImportError:
     def tqdm(iterable, **_kwargs):
+        # tqdm이 설치되지 않아도 전처리 자체는 진행되게 원본 iterable을 그대로 돌려준다.
         return iterable
 
 
@@ -56,11 +57,13 @@ TRANSLATE_QUANTIZATION = "8bit"
 MODEL_DTYPE = "bfloat16"
 TRANSLATE_DEVICE_MAP = None
 
+# 4bit/8bit 양자화 세부 설정은 TranslateGemmaConfig로 그대로 전달된다.
 BNB_4BIT_QUANT_TYPE = "nf4"
 BNB_4BIT_COMPUTE_DTYPE = "bfloat16"
 BNB_4BIT_USE_DOUBLE_QUANT = True
 BNB_8BIT_THRESHOLD = 6.0
 
+# 입력 chunk와 생성 출력이 모델 전체 토큰 예산 안에 들어가도록 번역기가 사용하는 값이다.
 MAX_TRANSLATE_INPUT_TOKENS = 1024
 HARD_MAX_TRANSLATE_INPUT_TOKENS = 2000
 MAX_TRANSLATE_TOTAL_TOKENS = 2048
@@ -68,6 +71,7 @@ MAX_TRANSLATE_OUTPUT_TOKENS = 2000
 MIN_TRANSLATE_OUTPUT_TOKENS = 1
 OUTPUT_TOKEN_RATIO = 1.6
 
+# 실패 디버그와 번역 감사 로그는 언어 오인식/잘림/pad 출력 검수에 사용한다.
 TRANSLATE_DEBUG_ON_FAILURE = True
 TRANSLATE_DEBUG_TO_CONSOLE = True
 TRANSLATE_DEBUG_DIR = "./logs/translation_debug"
@@ -77,6 +81,7 @@ TRANSLATE_AUDIT_DIR = "./logs/translation_audit"
 TRANSLATE_LOG_PROGRESS = True
 TRANSLATE_LOG_PREVIEW_CHARS = 120
 
+# META_INTERVAL은 본문 토큰 사이에 tags/categories 메타 토큰을 다시 넣는 간격이다.
 META_INTERVAL = 30
 CACHE_SAVE_EVERY = 20
 PRINT_ROW_TIMING = True
@@ -234,34 +239,44 @@ class HtmlToText(HTMLParser):
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
+        # parts에 텍스트 조각과 필요한 줄바꿈을 순서대로 쌓아 마지막에 합친다.
         self.parts: list[str] = []
+        # script/code 같은 제거 대상 태그 안쪽이면 handle_data가 텍스트를 추가하지 않게 깊이를 센다.
         self.skip_depth = 0
 
     def handle_starttag(self, tag, _attrs):
         tag = tag.lower()
         if tag in self.SKIP_TAGS:
+            # 제거 대상 태그는 중첩될 수 있으므로 bool이 아니라 depth로 관리한다.
             self.skip_depth += 1
             return
         if tag == "img":
+            # 이미지는 alt가 있어도 설명/본문 검색 신호로 쓰지 않는다.
             return
         if tag == "li":
+            # 목록 항목은 앞 항목과 붙지 않게 줄바꿈과 목록 표시를 넣는다.
             self.parts.append("\n- ")
         elif tag in self.BLOCK_TAGS:
+            # 블록 태그는 문장 경계를 보존하기 위해 줄바꿈으로 바꾼다.
             self.parts.append("\n")
 
     def handle_endtag(self, tag):
         tag = tag.lower()
         if tag in self.SKIP_TAGS and self.skip_depth:
+            # 제거 대상 태그가 끝나면 다시 일반 텍스트를 받을 수 있게 depth를 줄인다.
             self.skip_depth -= 1
             return
         if not self.skip_depth and tag in self.BLOCK_TAGS:
+            # 닫는 블록 태그도 다음 텍스트와 붙지 않도록 줄바꿈을 넣는다.
             self.parts.append("\n")
 
     def handle_data(self, data):
         if not self.skip_depth:
+            # 제거 대상 태그 바깥의 실제 텍스트만 보존한다.
             self.parts.append(data)
 
     def get_text(self) -> str:
+        # normalize_spacing이 뒤에서 공백을 정리하므로 여기서는 순서만 유지해 합친다.
         return "".join(self.parts)
 
 
@@ -269,16 +284,20 @@ def normalize_spacing(text: str) -> str:
     """문단 경계는 보존하고 줄 내부 공백만 정리한다."""
     lines = []
     for line in str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        # 탭/연속 공백은 한 칸으로 줄이되, 줄 자체는 남겨 문단 경계를 유지한다.
         lines.append(re.sub(r"[ \t\f\v]+", " ", line).strip())
+    # 너무 많은 빈 줄은 두 줄까지만 남겨 이후 번역기가 문단 경계로 볼 수 있게 한다.
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
 def clean_text(text: str) -> str:
     """Modrinth description/body에 섞인 HTML, Markdown, 링크, 코드 노이즈를 제거한다."""
+    # NaN이 문자열 "nan"으로 들어가지 않게 막고, &amp; 같은 HTML entity를 원래 문자로 되돌린다.
     text = html.unescape("" if pd.isna(text) else str(text))
     text = EMOJI_RE.sub(" ", text)
 
     # 코드/이미지/URL은 추천 의미보다 노이즈가 큰 경우가 많아 먼저 제거한다.
+    # 블록 성격의 문법은 앞뒤 문장이 붙지 않도록 줄바꿈으로 치환한다.
     text = re.sub(r"<!--.*?-->", "\n", text, flags=re.DOTALL)
     text = re.sub(r"```.*?```|~~~.*?~~~", "\n", text, flags=re.DOTALL)
     text = re.sub(r"(?m)^\s{4,}\S.*$", "\n", text)
@@ -297,6 +316,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r"<?(?:https?://[^\s<>)]+|www\.[^\s<>)]+|mailto:[^\s<>)]+)>?", " ", text)
 
     # 제목/목록의 텍스트는 남기고 Markdown 장식만 제거한다.
+    # 목록 기호는 버리지만 목록 항목 문장은 추천 신호가 될 수 있어 남긴다.
     text = re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "\n", text)
     text = re.sub(r"(?m)^\s{0,3}>\s?", "", text)
     text = re.sub(r"(?m)^\s*[-*_]{3,}\s*$", "\n", text)
@@ -308,6 +328,7 @@ def clean_text(text: str) -> str:
     text = text.replace("|", " ")
 
     if re.search(r"</?[A-Za-z][^>]*>", text):
+        # 정규식 정리 뒤에도 태그가 남아 있으면 HTMLParser로 텍스트만 다시 추출한다.
         parser = HtmlToText()
         parser.feed(text)
         parser.close()
@@ -319,6 +340,7 @@ def clean_text(text: str) -> str:
 def preprocess_english(text: str, nlp) -> list[str]:
     """spaCy로 영어 토큰을 나누고 품사/원형/불용어 기준으로 검색 토큰을 만든다."""
     text = html.unescape(str(text))
+    # data pack, vanilla+처럼 여러 표기가 가능한 표현은 토큰화 전에 하나의 검색 토큰으로 통일한다.
     for pattern, replacement in DOMAIN_PHRASES:
         text = pattern.sub(replacement, text)
     # v2.0~2.2, v1.x 같은 모드팩 자체 버전/changelog 표기는 추천 신호가 약해 제거한다.
@@ -329,12 +351,14 @@ def preprocess_english(text: str, nlp) -> list[str]:
 
     tokens: list[str] = []
     for token in nlp(text):
+        # raw는 보호어/숫자/버전 판정에 쓰고, lemma는 일반 단어의 원형화 결과에 쓴다.
         raw = token.text.strip("._-").lower()
         if not raw or token.is_space or token.is_punct or token.like_url:
             continue
 
         parts = [raw] if NUMBER_RE.fullmatch(raw) else [part for part in re.split(r"[._-]+", raw) if part]
         if len(parts) > 1:
+            # 하이픈/점으로 붙은 단어는 과분해하지 않고, 보호어로 등록된 조각만 살린다.
             for part in parts:
                 if part in PROTECTED_TERMS:
                     tokens.append(part)
@@ -344,6 +368,7 @@ def preprocess_english(text: str, nlp) -> list[str]:
         if term in PROTECTED_TERMS:
             tokens.append(term)
             continue
+        # 게임 버전과 순수 숫자는 추천 의미보다 필터/메타데이터 성격이 강해 텍스트에서는 제외한다.
         if MINECRAFT_VERSION_RE.fullmatch(term):
             continue
         if NUMBER_RE.fullmatch(term):
@@ -368,26 +393,34 @@ def meta_tokens(row) -> list[str]:
     """tags/categories를 검색 가중치용 메타 토큰으로 만든다."""
     tokens: list[str] = []
     for column, prefix in (("tags", "tag"), ("categories", "category")):
+        # tags/categories는 쉼표 문자열이므로 값별로 분리한다. 빈 값은 빈 리스트로 처리한다.
         raw_values = [] if pd.isna(row.get(column, "")) else str(row.get(column, "")).split(",")
         for raw in raw_values:
             value = raw.strip().lower()
+            # 공백이 있는 카테고리는 하나의 메타 토큰이 되게 밑줄로 묶는다.
             value = re.sub(r"\s+", "_", value)
+            # 메타 토큰은 TF-IDF에 들어가므로 검색 토큰에 쓸 수 있는 문자만 남긴다.
             value = re.sub(r"[^a-z0-9+#._-]+", "", value).strip("._-")
             if value:
                 tokens.append(f"{prefix}:{value}")
+    # tags와 categories에 같은 값이 반복될 수 있어 순서를 유지한 채 중복만 제거한다.
     return list(dict.fromkeys(tokens))
 
 
 def insert_meta(tokens: list[str], meta: list[str]) -> list[str]:
     """메타 토큰을 시작, 일정 간격, 끝에 반복 삽입해 태그/카테고리 신호를 강화한다."""
     if not meta:
+        # 메타 정보가 없는 row는 본문 토큰만 그대로 사용한다.
         return tokens
 
+    # 시작 부분에 한 번 넣어 짧은 description에서도 메타 신호가 사라지지 않게 한다.
     output = meta[:]
     for index, token in enumerate(tokens, 1):
         output.append(token)
         if index % META_INTERVAL == 0:
+            # 긴 본문에서는 META_INTERVAL마다 다시 넣어 뒤쪽 chunk에서도 태그/카테고리 신호가 보이게 한다.
             output.extend(meta)
+    # 끝에도 한 번 넣어 마지막 토큰 구간에서 메타 신호가 약해지지 않게 한다.
     output.extend(meta)
     return output
 
@@ -401,6 +434,7 @@ def append_output_row(row, processed_description: str, complete: int, columns: l
     record["description"] = processed_description
     record["complete"] = int(complete)
 
+    # 한 row가 끝날 때마다 저장해야 긴 번역 작업 중단 후에도 성공한 row를 다시 처리하지 않는다.
     pd.DataFrame([record], columns=columns).to_csv(
         path,
         mode="a",
@@ -414,21 +448,31 @@ def main():
     df = pd.read_csv(INPUT_CSV)
     columns = list(df.columns) + (["complete"] if "complete" not in df.columns else [])
 
-    # 기존 출력 CSV에서 complete=1인 row는 건너뛴다. complete가 없던 예전 출력은 모두 미완료로 본다.
+    # 이전 실행에서 complete=0/null로 끝난 실패 row는 재시도 대상이므로 출력 CSV에서 먼저 제거한다.
+    # 이렇게 해두면 모델 생성/추천 단계가 "최종 CSV에는 성공 row만 남는다"는 단순한 전제를 가질 수 있다.
     complete_by_key: dict[str, bool] = {}
     output_path = Path(OUTPUT_CSV)
     if output_path.exists() and output_path.stat().st_size > 0:
         out_df = pd.read_csv(output_path)
         if "complete" not in out_df.columns:
             out_df["complete"] = 0
+        complete_text = out_df["complete"].fillna("").astype(str).str.strip().str.lower()
+        # 성공 row만 남기고 실패 row는 삭제한다. 실패 row가 남아 있으면 모델 생성 시 행 수가 꼬일 수 있다.
+        complete_mask = complete_text.isin({"1", "1.0", "true", "yes", "y"})
+        removed_rows = len(out_df) - int(complete_mask.sum())
+        if removed_rows:
+            out_df = out_df[complete_mask].copy()
             out_df.to_csv(output_path, index=False, encoding="utf-8-sig")
+            print(f"[preprocess resume] removed incomplete rows={removed_rows}")
         for _idx, done_row in out_df.iterrows():
+            # 남아 있는 출력 row는 모두 성공 row이므로, 같은 slug/url은 입력에서 다시 만나도 건너뛴다.
             slug = "" if pd.isna(done_row.get("slug", "")) else str(done_row.get("slug", ""))
             url = "" if pd.isna(done_row.get("url", "")) else str(done_row.get("url", ""))
             key = slug or url
             if key:
-                complete_by_key[key] = str(done_row.get("complete", "")).strip().lower() in {"1", "true", "yes", "y"}
+                complete_by_key[key] = True
 
+    # 번역기는 실제 번역이 필요할 때 내부에서 모델을 로드한다. 여기서는 설정 객체만 준비한다.
     translator = TranslateGemmaTranslator(TranslateGemmaConfig(
         model_id=TRANSLATE_MODEL_ID,
         model_dir=TRANSLATE_MODEL_DIR,
@@ -456,6 +500,7 @@ def main():
         log_progress=TRANSLATE_LOG_PROGRESS,
         log_preview_chars=TRANSLATE_LOG_PREVIEW_CHARS,
     ))
+    # parser/ner는 검색 토큰 생성에 쓰지 않으므로 꺼서 로드와 실행 비용을 줄인다.
     nlp = spacy.load(SPACY_MODEL_NAME, disable=["parser", "ner"])
     language_detector = (
         LanguageDetectorBuilder
@@ -463,22 +508,26 @@ def main():
         .with_preloaded_language_models()
         .build()
     ) if USE_TRANSLATION else None
+    # 번역 캐시는 같은 원문/언어/모델 설정이면 다시 생성하지 않기 위한 저장소다.
     cache = load_translation_cache(TRANSLATION_CACHE)
 
+    # 마지막 출력에서 처리 결과를 확인하기 위한 단순 카운터다.
     success_count = 0
     error_count = 0
     skipped_count = 0
 
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Preprocessing"):
         start = time.perf_counter()
+        # resume 판단에는 원본 CSV index보다 slug/url이 안정적이다.
         slug = "" if pd.isna(row.get("slug", "")) else str(row.get("slug", ""))
         url = "" if pd.isna(row.get("url", "")) else str(row.get("url", ""))
         key = slug or url
+        # 이미 성공 row가 출력 CSV에 있으면 같은 작업을 반복하지 않는다.
         if key and complete_by_key.get(key):
             skipped_count += 1
             continue
 
-        # description과 body가 한 문장처럼 붙지 않도록 문단 경계로 합친다.
+        # description/body 각각을 먼저 정리한 뒤, 둘이 한 문장처럼 붙지 않도록 빈 줄 두 개로 합친다.
         source_text = normalize_spacing("\n\n".join(
             part for part in (
                 clean_text(row.get("description", "")),
@@ -487,6 +536,7 @@ def main():
         ))
 
         if not source_text:
+            # 원문 텍스트가 전혀 없으면 만들 토큰도 없지만, 처리 자체는 끝난 row로 기록한다.
             append_output_row(row, "", 1, columns)
             if key:
                 complete_by_key[key] = True
@@ -496,8 +546,10 @@ def main():
         try:
             english_text = source_text
             if USE_TRANSLATION and language_detector is not None:
+                # Lingua가 반환한 enum을 ISO 639-1 문자열(en/ko/ja/zh 등)로 바꾼다.
                 language = language_detector.detect_language_of(source_text)
                 lang = "unknown" if language is None else language.iso_code_639_1.name.lower()
+                # 영어/unknown은 번역하지 않는다. 비영어로 확정된 경우만 영어로 맞춘다.
                 if lang not in {"en", "unknown"}:
                     english_text = translator.translate_text(
                         source_text,
@@ -508,9 +560,12 @@ def main():
                         raise_on_failure=True,
                     ) or source_text
 
+            # 영어 텍스트를 검색 토큰으로 바꾸고, tags/categories 메타 토큰을 일정 간격으로 끼워 넣는다.
             tokens = insert_meta(preprocess_english(english_text, nlp), meta_tokens(row))
+            # 성공 row는 description을 토큰 문자열로 교체하고 complete=1로 append한다.
             append_output_row(row, " ".join(tokens).strip(), 1, columns)
         except Exception as exc:
+            # row 중 일부 chunk라도 실패하면 완료로 보지 않는다. 다음 실행에서 다시 처리하도록 complete=0으로 남긴다.
             error_count += 1
             append_output_row(row, "", 0, columns)
             if key:
@@ -520,14 +575,17 @@ def main():
             continue
 
         if key:
+            # 같은 실행 안에서 같은 key를 다시 만나도 중복 처리하지 않게 메모리 상태도 갱신한다.
             complete_by_key[key] = True
         success_count += 1
 
         if PRINT_ROW_TIMING:
             print(f"[row] index={idx} elapsed={time.perf_counter() - start:.1f}s")
         if success_count and success_count % CACHE_SAVE_EVERY == 0:
+            # 긴 실행 중 프로세스가 죽어도 최근 번역 캐시를 잃지 않도록 주기적으로 저장한다.
             save_translation_cache(cache, TRANSLATION_CACHE)
 
+    # 루프 종료 후 남은 캐시를 저장하고 전체 처리 요약을 출력한다.
     save_translation_cache(cache, TRANSLATION_CACHE)
     print(
         f"done: {OUTPUT_CSV} "

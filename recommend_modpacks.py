@@ -124,6 +124,21 @@ QUERY_TRANSLATE_LOG_PREVIEW_CHARS = 120
 # `.ui` 파일을 파이썬 클래스와 쓸 수 있게 로드한다.
 FORM_CLASS = uic.loadUiType(str(UI_PATH))[0]
 
+NUMERIC_SORT_ROLE = Qt.UserRole + 1
+
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    """숫자 정렬값이 있으면 문자열 대신 숫자로 비교한다."""
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        left = self.data(NUMERIC_SORT_ROLE)
+        right = other.data(NUMERIC_SORT_ROLE)
+
+        if left is not None and right is not None:
+            return float(left) < float(right)
+
+        return super().__lt__(other)
+
 
 class ModpackRecommendationApp(QWidget, FORM_CLASS):
     """추천 앱 메인 위젯.
@@ -450,21 +465,25 @@ class ModpackRecommendationApp(QWidget, FORM_CLASS):
 
         for table_row, df_index in enumerate(ranked_indices):
             modpack = self.df.iloc[df_index]
+            score_value = float(final_score[final_order][table_row])
+            downloads_value = int(downloads[df_index])
 
-            # 테이블에 표시할 값. score 3종은 계산값이고 나머지는 CSV 원본 메타데이터다.
+            # 표시값은 문자열로 두되, 숫자 컬럼은 별도 정렬값을 함께 보관한다.
             values = [
-                f"{final_score[final_order][table_row]:.4f}",
-                modpack.get("name", ""),
-                int(modpack.get("downloads", 0) or 0),
-                modpack.get("loaders", ""),
-                modpack.get("game_versions", ""),
-                modpack.get("client_side", ""),
-                modpack.get("server_side", ""),
-                modpack.get("url", ""),
+                (f"{score_value:.4f}", score_value),
+                (modpack.get("name", ""), None),
+                (str(downloads_value), downloads_value),
+                (modpack.get("loaders", ""), None),
+                (modpack.get("game_versions", ""), None),
+                (modpack.get("client_side", ""), None),
+                (modpack.get("server_side", ""), None),
+                (modpack.get("url", ""), None),
             ]
 
-            for column, value in enumerate(values):
-                item = QTableWidgetItem(str(value))
+            for column, (display_value, sort_value) in enumerate(values):
+                item = SortableTableWidgetItem(str(display_value))
+                if sort_value is not None:
+                    item.setData(NUMERIC_SORT_ROLE, sort_value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 self.tbl_results.setItem(table_row, column, item)
 

@@ -54,3 +54,4 @@ tzdata==2026.2
 gensim
 scikit-learn
 scipy
+PyQt5
